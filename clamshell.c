@@ -1,5 +1,6 @@
 #include "clamshell.h"
 
+#include <dispatch/dispatch.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOMessage.h>
@@ -8,9 +9,9 @@
 // goClamshellChanged is implemented in Go via cgo //export.
 extern void goClamshellChanged(bool closed);
 
-static io_service_t       gRootDomain    = MACH_PORT_NULL;
-static IONotificationPortRef gNotifyPort = NULL;
-static io_object_t        gNotification  = MACH_PORT_NULL;
+static io_service_t          gRootDomain   = MACH_PORT_NULL;
+static IONotificationPortRef gNotifyPort   = NULL;
+static io_object_t           gNotification = MACH_PORT_NULL;
 
 static io_service_t copy_root_domain(void) {
 	return IOServiceGetMatchingService(kIOMainPortDefault,
@@ -62,14 +63,15 @@ void clamshell_subscribe(void) {
 		gRootDomain = MACH_PORT_NULL;
 		return;
 	}
-	CFRunLoopAddSource(CFRunLoopGetCurrent(),
-	                   IONotificationPortGetRunLoopSource(gNotifyPort),
-	                   kCFRunLoopDefaultMode);
+	// Deliver callbacks via the dispatch main queue so this works without the
+	// caller owning the current thread's CFRunLoop — NSApplication and
+	// dispatch_main both drive the main queue.
+	IONotificationPortSetDispatchQueue(gNotifyPort, dispatch_get_main_queue());
 	IOServiceAddInterestNotification(gNotifyPort, gRootDomain,
 	                                 kIOGeneralInterest, clamshell_callback,
 	                                 NULL, &gNotification);
 }
 
 void clamshell_run_main_loop(void) {
-	CFRunLoopRun();
+	dispatch_main();
 }
